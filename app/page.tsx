@@ -497,7 +497,7 @@ function Slip({ rows, emps, slipNo, slipMonth, setSlipNo, setSlipMonth }: any) {
         ["직책수당", r.duty],
         ["출근수당", r.attend],
         ["자격수당", r.cert],
-        ["통신비(비과세)", r.tel],
+        ["통신비(과세)", r.tel],
         ["식대(비과세)", r.meal],
         ["차량유지비(비과세)", r.car],
       ]
