@@ -1,7 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { loadPayroll, employeesOf, won, PayRow } from "@/lib/payroll";
+import { useMemo, useRef, useState } from "react";
+import {
+  parseWorkbook,
+  rowsFromMatrix,
+  employeesOf,
+  won,
+  PayRow,
+} from "@/lib/payroll";
+import { DEMO_MATRIX } from "@/lib/demoData";
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 type Tab = "summary" | "ledger" | "slip" | "deduction";
@@ -9,48 +16,162 @@ type Tab = "summary" | "ledger" | "slip" | "deduction";
 export default function Page() {
   const [rows, setRows] = useState<PayRow[]>([]);
   const [err, setErr] = useState("");
+  const [source, setSource] = useState<"none" | "file" | "demo">("none");
+  const [fileName, setFileName] = useState("");
   const [tab, setTab] = useState<Tab>("summary");
   const [empNo, setEmpNo] = useState<number>(0); // 0 = 전체
   const [month, setMonth] = useState<number>(0); // 0 = 전체
   const [slipNo, setSlipNo] = useState<number>(1);
   const [slipMonth, setSlipMonth] = useState<number>(7);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    loadPayroll("/data/payroll_sample.xlsx")
-      .then((r) => {
-        setRows(r);
-        if (r.length) setSlipNo(employeesOf(r)[0].no);
-      })
-      .catch((e) => setErr(String(e?.message ?? e)));
-  }, []);
+  const applyRows = (r: PayRow[]) => {
+    setRows(r);
+    setErr("");
+    if (r.length) setSlipNo(employeesOf(r)[0].no);
+  };
+
+  const onFile = async (file: File | undefined) => {
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer(); // 브라우저 메모리에서만 처리 — 서버 전송 없음
+      const r = parseWorkbook(buf);
+      applyRows(r);
+      setSource("file");
+      setFileName(file.name);
+      setTab("summary");
+    } catch (e: any) {
+      setErr(String(e?.message ?? e));
+      setRows([]);
+      setSource("none");
+    }
+  };
+
+  const loadDemo = () => {
+    applyRows(rowsFromMatrix(DEMO_MATRIX));
+    setSource("demo");
+    setFileName("");
+    setTab("summary");
+  };
+
+  const reset = () => {
+    setRows([]);
+    setSource("none");
+    setFileName("");
+    setErr("");
+    if (inputRef.current) inputRef.current.value = "";
+  };
 
   const emps = useMemo(() => employeesOf(rows), [rows]);
 
-  if (err)
+  const HiddenInput = (
+    <input
+      ref={inputRef}
+      type="file"
+      accept=".xlsx,.xlsm,.xls"
+      style={{ display: "none" }}
+      onChange={(e) => onFile(e.target.files?.[0])}
+    />
+  );
+
+  // ── 랜딩(데이터 미선택) 화면 ──
+  if (!rows.length) {
     return (
-      <div className="wrap">
-        <div className="loading">데이터를 불러오지 못했습니다: {err}</div>
-      </div>
+      <>
+        <header className="top">
+          <div className="wrap">
+            <div>
+              <h1>㈜신정개발 경영지원 대시보드</h1>
+              <div className="sub">급여 정산 · 4대보험 · 세금 · 급여명세서</div>
+            </div>
+            <span className="badge">로컬 전용 · 데이터 비저장</span>
+          </div>
+        </header>
+        <div className="wrap">
+          {HiddenInput}
+          <div className="drop">
+            <div className="drop-ic">🔒</div>
+            <h2>급여 엑셀 파일을 선택하세요</h2>
+            <p>
+              선택한 엑셀은 <b>내 컴퓨터(브라우저) 안에서만</b> 열려 분석됩니다.
+              <br />
+              파일이 서버나 GitHub·인터넷 어디로도 <b>업로드·전송되지 않습니다.</b>
+            </p>
+            <div className="drop-actions">
+              <button className="btn primary" onClick={() => inputRef.current?.click()}>
+                📂 내 엑셀 파일 선택
+              </button>
+              <button className="btn" onClick={loadDemo}>
+                👀 가상 데이터로 미리보기
+              </button>
+            </div>
+            {err && <div className="err">⚠️ {err}</div>}
+            <div className="drop-hint">
+              지원 형식: .xlsx / .xlsm · &lsquo;급여대장&rsquo; 시트가 포함된 급여관리 마스터 파일
+            </div>
+          </div>
+
+          <div className="secgrid">
+            <div className="seccard">
+              <div className="ic">🖥️</div>
+              <div className="t">데이터는 내 PC에만</div>
+              <div className="d">파일은 브라우저 메모리에서만 파싱되고, 새로고침하면 사라집니다. 서버 저장 없음.</div>
+            </div>
+            <div className="seccard">
+              <div className="ic">🚫</div>
+              <div className="t">저장소에 엑셀 없음</div>
+              <div className="d">모든 엑셀·CSV는 .gitignore로 차단되어 GitHub에 올라가거나 다운로드될 수 없습니다.</div>
+            </div>
+            <div className="seccard">
+              <div className="ic">🔄</div>
+              <div className="t">엑셀이 곧 데이터</div>
+              <div className="d">엑셀에서 급여를 입력·수정한 뒤 다시 선택하면 대시보드가 즉시 갱신됩니다.</div>
+            </div>
+          </div>
+          <div className="footer">
+            ㈜신정개발 경영지원 대시보드 · 데이터 원본은 사용자 PC의 엑셀 파일 · GitHub → Vercel 배포
+          </div>
+        </div>
+      </>
     );
-  if (!rows.length)
-    return <div className="loading">급여 데이터를 불러오는 중…</div>;
+  }
 
   return (
     <>
       <header className="top">
         <div className="wrap">
           <div>
-            <h1>㈜신정개발 급여 대시보드</h1>
+            <h1>㈜신정개발 경영지원 대시보드</h1>
             <div className="sub">직원 급여 정산 · 4대보험 · 세금 · 급여명세서</div>
           </div>
-          <span className="badge">샘플 · 가상데이터 · 2026년</span>
+          <span className="badge">
+            {source === "demo" ? "가상 데이터 미리보기" : `📄 ${fileName}`}
+          </span>
         </div>
       </header>
 
       <div className="wrap">
-        <div className="note">
-          ⚠️ 이 화면의 모든 이름·연락처·급여는 <b>공개 배포용 가상 데이터</b>입니다. 실제 직원 정보가
-          아닙니다. 실제 운영 시에는 저장소를 비공개로 전환하고 로그인을 적용하세요.
+        {HiddenInput}
+        <div className="bar">
+          <div>
+            {source === "demo" ? (
+              <span>
+                <b>가상 데이터</b>로 미리보는 중입니다 (실제 직원 정보 아님).
+              </span>
+            ) : (
+              <span>
+                <b>{fileName}</b> · 내 컴퓨터에서만 열림 (서버 전송 없음)
+              </span>
+            )}
+          </div>
+          <div className="bar-actions">
+            <button className="btn sm" onClick={() => inputRef.current?.click()}>
+              📂 다른 파일
+            </button>
+            <button className="btn sm ghost" onClick={reset}>
+              ✕ 닫기
+            </button>
+          </div>
         </div>
 
         <div className="tabs">

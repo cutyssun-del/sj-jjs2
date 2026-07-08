@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 
-// 급여대장 시트 컬럼 인덱스(0-based) — build 스크립트의 열 순서와 일치
+// 급여대장 시트 컬럼 인덱스(0-based) — build 스크립트/데모 매트릭스의 열 순서와 일치
 export interface PayRow {
   month: number;        // 귀속월 (1~12)
   no: number;           // NO
@@ -47,7 +47,8 @@ const num = (v: unknown): number => {
 const monthOf = (v: unknown): number => {
   if (v instanceof Date) return v.getMonth() + 1;
   if (typeof v === "number") {
-    const d = XLSX.SSF ? XLSX.SSF.parse_date_code(v) : null;
+    if (v >= 1 && v <= 12) return v;               // 데모 매트릭스: 월 숫자
+    const d = XLSX.SSF ? XLSX.SSF.parse_date_code(v) : null; // 엑셀 날짜 serial
     if (d && d.m) return d.m;
   }
   if (typeof v === "string") {
@@ -57,53 +58,71 @@ const monthOf = (v: unknown): number => {
   return 0;
 };
 
-export async function loadPayroll(url: string): Promise<PayRow[]> {
-  const res = await fetch(url);
-  const buf = await res.arrayBuffer();
+// 한 행(원시 셀 배열, 0..30)을 PayRow로 변환. 데이터 행이 아니면 null.
+export function mapRow(r: unknown[]): PayRow | null {
+  const no = num(r[1]);
+  const name = typeof r[3] === "string" ? r[3].trim() : "";
+  if (!no || !name || num(r[6]) <= 0) return null;
+  return {
+    month: monthOf(r[0]),
+    no,
+    empId: String(r[2] ?? ""),
+    name,
+    dept: String(r[4] ?? ""),
+    grade: String(r[5] ?? ""),
+    base: num(r[6]),
+    hourly: num(r[7]),
+    otHours: num(r[8]),
+    ntHours: num(r[9]),
+    fixedOt: num(r[10]),
+    otPay: num(r[11]),
+    ntPay: num(r[12]),
+    duty: num(r[13]),
+    attend: num(r[14]),
+    cert: num(r[15]),
+    tel: num(r[16]),
+    meal: num(r[17]),
+    car: num(r[18]),
+    gross: num(r[19]),
+    taxFree: num(r[20]),
+    taxable: num(r[21]),
+    np: num(r[22]),
+    hi: num(r[23]),
+    ltc: num(r[24]),
+    ei: num(r[25]),
+    incomeTax: num(r[26]),
+    localTax: num(r[27]),
+    etc: num(r[28]),
+    deduction: num(r[29]),
+    net: num(r[30]),
+  };
+}
+
+// 사용자가 자신의 PC에서 고른 엑셀 파일(ArrayBuffer)을 브라우저 안에서 파싱.
+// 파일은 서버·저장소로 전송되지 않고 이 함수 안에서만 처리됨.
+export function parseWorkbook(buf: ArrayBuffer): PayRow[] {
   const wb = XLSX.read(buf, { type: "array", cellDates: true });
   const ws = wb.Sheets["급여대장"];
-  if (!ws) throw new Error("급여대장 시트를 찾을 수 없습니다.");
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false });
-
+  if (!ws)
+    throw new Error(
+      "'급여대장' 시트를 찾을 수 없습니다. 급여관리 마스터 엑셀 파일을 선택했는지 확인하세요."
+    );
+  const raw = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, blankrows: false });
   const out: PayRow[] = [];
-  for (const r of rows) {
-    const no = num(r[1]);
-    const name = typeof r[3] === "string" ? r[3].trim() : "";
-    // 데이터 행만: NO가 양수 & 성명이 문자열 & 기본급이 존재
-    if (!no || !name || num(r[6]) <= 0) continue;
-    out.push({
-      month: monthOf(r[0]),
-      no,
-      empId: String(r[2] ?? ""),
-      name,
-      dept: String(r[4] ?? ""),
-      grade: String(r[5] ?? ""),
-      base: num(r[6]),
-      hourly: num(r[7]),
-      otHours: num(r[8]),
-      ntHours: num(r[9]),
-      fixedOt: num(r[10]),
-      otPay: num(r[11]),
-      ntPay: num(r[12]),
-      duty: num(r[13]),
-      attend: num(r[14]),
-      cert: num(r[15]),
-      tel: num(r[16]),
-      meal: num(r[17]),
-      car: num(r[18]),
-      gross: num(r[19]),
-      taxFree: num(r[20]),
-      taxable: num(r[21]),
-      np: num(r[22]),
-      hi: num(r[23]),
-      ltc: num(r[24]),
-      ei: num(r[25]),
-      incomeTax: num(r[26]),
-      localTax: num(r[27]),
-      etc: num(r[28]),
-      deduction: num(r[29]),
-      net: num(r[30]),
-    });
+  for (const r of raw) {
+    const row = mapRow(r);
+    if (row) out.push(row);
+  }
+  if (!out.length)
+    throw new Error("급여대장 시트에서 직원 데이터를 찾지 못했습니다. 열 구성을 확인하세요.");
+  return out;
+}
+
+export function rowsFromMatrix(matrix: (string | number)[][]): PayRow[] {
+  const out: PayRow[] = [];
+  for (const r of matrix) {
+    const row = mapRow(r);
+    if (row) out.push(row);
   }
   return out;
 }
